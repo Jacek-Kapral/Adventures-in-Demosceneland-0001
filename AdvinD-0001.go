@@ -15,9 +15,13 @@ const (
 	numPoints = 320
 )
 
-var (
-	yellow = color.RGBA{R: 0xff, G: 0xff, B: 0x00, A: 0xff}
-)
+func yellowShade(segmentIndex int, phase float64) color.RGBA {
+	t := float64(segmentIndex)*0.02 + phase*0.5
+	bright := 0.6 + 0.4*math.Sin(t)
+	r := uint8(255 * bright)
+	g := uint8((200 + 55*math.Cos(t*0.7)) * bright)
+	return color.RGBA{R: r, G: g, B: 0x00, A: 0xff}
+}
 
 type game struct {
 	buf   []float64
@@ -34,8 +38,10 @@ func newGame() *game {
 
 func (g *game) Update() error {
 	g.phase += 0.1
-	for i := range g.buf {
-		g.buf[i] = (rand.Float64()-0.5)*0.8 + math.Sin(g.phase+float64(i)*0.05)*0.2
+	g.buf[0] = (rand.Float64() - 0.5) * 0.25
+	for i := 1; i < len(g.buf); i++ {
+		delta := (rand.Float64() - 0.5) * 0.08
+		g.buf[i] = g.buf[i-1] + delta
 	}
 	return nil
 }
@@ -50,7 +56,7 @@ func (g *game) Draw(screen *ebiten.Image) {
 		y0 := midY - g.buf[i]*scaleY
 		x1 := float64(i+1) * stepX
 		y1 := midY - g.buf[i+1]*scaleY
-		ebitenutil.DrawLine(screen, x0, y0, x1, y1, yellow)
+		ebitenutil.DrawLine(screen, x0, y0, x1, y1, yellowShade(i, g.phase))
 	}
 }
 
