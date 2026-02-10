@@ -10,15 +10,14 @@ import (
 )
 
 const (
-	screenW    = 640
-	screenH    = 480
-	numPoints  = 320
-	pixelSize  = 8
-	lineStrokeW = 1.5
+	screenW   = 640
+	screenH   = 480
+	numPoints = 320
+	pixelSize = 1.9
 )
 
-func quantize(v float64, grid int) float64 {
-	return float64(int(v/float64(grid)) * grid)
+func quantize(v, grid float64) float64 {
+	return math.Round(v/grid) * grid
 }
 
 func yellowShade(segmentIndex int, phase float64) color.RGBA {
@@ -57,13 +56,11 @@ func (g *game) Draw(screen *ebiten.Image) {
 	midY := float64(screenH) / 2
 	scaleY := float64(screenH) * 0.35
 	stepX := float64(screenW) / float64(numPoints-1)
-	for i := 0; i < numPoints-1; i++ {
-		x0 := quantize(float64(i)*stepX, pixelSize)
-		y0 := quantize(midY-g.buf[i]*scaleY, pixelSize)
-		x1 := quantize(float64(i+1)*stepX, pixelSize)
-		y1 := quantize(midY-g.buf[i+1]*scaleY, pixelSize)
+	for i := 0; i < numPoints; i++ {
+		x := quantize(float64(i)*stepX, pixelSize)
+		y := quantize(midY-g.buf[i]*scaleY, pixelSize)
 		clr := yellowShade(i, g.phase)
-		vector.StrokeLine(screen, float32(x0), float32(y0), float32(x1), float32(y1), float32(lineStrokeW), clr, false)
+		vector.DrawFilledRect(screen, float32(x), float32(y), float32(pixelSize), float32(pixelSize), clr, false)
 	}
 }
 
