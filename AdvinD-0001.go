@@ -12,12 +12,12 @@ import (
 const (
 	screenW   = 640
 	screenH   = 480
-	numPoints = 320
-	pixelSize = 1.9
+	numPoints = 640
+	pixelSize = 2
 )
 
-func quantize(v, grid float64) float64 {
-	return math.Round(v/grid) * grid
+func quantize(v float64, grid int) float64 {
+	return float64(int(v/float64(grid)) * grid)
 }
 
 func yellowShade(segmentIndex int, phase float64) color.RGBA {
