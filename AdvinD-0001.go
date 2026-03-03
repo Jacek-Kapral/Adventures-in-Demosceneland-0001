@@ -28,8 +28,9 @@ const (
 	titleSlideFrames    = 90
 	titleShineFrames    = 25
 	titleColorFadeFrames = 45
-	titleFadeFrames     = 120
-	shineBandW          = 70
+	titleFadeFrames      = 120
+	oscilloscopeFlatFrames = 60
+	shineBandW           = 70
 	shineGradientH   = 48
 	shinePeakAlpha    = 0.55
 )
@@ -166,7 +167,7 @@ func (g *game) Update() error {
 	}
 	g.phase += 0.1
 	total := titlePhaseTotalFrames()
-	if g.titleFrame > total {
+	if g.titleFrame > total+oscilloscopeFlatFrames {
 		g.buf[0] = (rand.Float64() - 0.5) * 0.25
 		for i := 1; i < numPoints; i++ {
 			delta := (rand.Float64() - 0.5) * 0.08
