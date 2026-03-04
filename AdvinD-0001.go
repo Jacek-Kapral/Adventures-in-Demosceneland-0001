@@ -105,7 +105,7 @@ var (
 )
 
 func init() {
-	for _, path := range []string{"assets/fonts/Audiowide-Regular.ttf", "assets/fonts/font.ttf", "assets/fonts/Orbitron-Medium.ttf", "font.ttf"} {
+	for _, path := range []string{"assets/fonts/RubikGlitch-Regular.ttf", "assets/fonts/font.ttf", "assets/fonts/Orbitron-Medium.ttf", "font.ttf"} {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
