@@ -41,6 +41,8 @@ const (
 
 	audioSampleRate = 48000
 	musicPath       = "assets/music/JungleMirage.mp3"
+
+	columnsAlpha = 0.4
 )
 
 func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
@@ -289,9 +291,11 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 		rightY := (float64(screenH) - float64(rh)) / 2
 		opL := &ebiten.DrawImageOptions{}
 		opL.GeoM.Translate(leftX, leftY)
+		opL.ColorScale.ScaleAlpha(columnsAlpha)
 		off.DrawImage(_columnLeft, opL)
 		opR := &ebiten.DrawImageOptions{}
 		opR.GeoM.Translate(rightX, rightY)
+		opR.ColorScale.ScaleAlpha(columnsAlpha)
 		off.DrawImage(_columnRight, opR)
 	}
 	op := &ebiten.DrawImageOptions{}
@@ -310,9 +314,11 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 		rightY := (float64(screenH) - float64(rh)) / 2
 		opL := &ebiten.DrawImageOptions{}
 		opL.GeoM.Translate(0, leftY)
+		opL.ColorScale.ScaleAlpha(columnsAlpha)
 		screen.DrawImage(_columnLeft, opL)
 		opR := &ebiten.DrawImageOptions{}
 		opR.GeoM.Translate(float64(screenW-rw), rightY)
+		opR.ColorScale.ScaleAlpha(columnsAlpha)
 		screen.DrawImage(_columnRight, opR)
 	}
 	g._drawOscilloscope(screen)
