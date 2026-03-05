@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"image/png"
 	"math"
 	"math/rand"
 	"os"
 	"sync"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/audio"
+	"github.com/hajimehoshi/ebiten/v2/audio/mp3"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text"
 	textv2 "github.com/hajimehoshi/ebiten/v2/text/v2"
@@ -24,23 +27,57 @@ const (
 	numPoints = 640
 	pixelSize = 2
 
-	titleFontSize       = 32
-	titleSlideFrames    = 90
-	titleShineFrames    = 25
-	titleColorFadeFrames = 45
-	titleFadeFrames      = 120
-	oscilloscopeFlatFrames = 60
-	shineBandW           = 70
-	shineGradientH   = 48
-	shinePeakAlpha    = 0.55
+	oscilloscopeShorterBy   = 226
+	titleFontSize          = 32
+	titleSlideFrames       = 90
+	titleShineFrames       = 25
+	titleColorFadeFrames   = 45
+	titleFadeFrames        = 120
+	columnsPhaseFrames    = 70
+	oscilloscopeFlatFrames = 120
+	shineBandW             = 70
+	shineGradientH         = 48
+	shinePeakAlpha         = 0.55
+
+	audioSampleRate = 48000
+	musicPath       = "assets/music/JungleMirage.mp3"
 )
+
+func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
+func oscilloscopeMarginX() int   { return oscilloscopeShorterBy / 2 }
 
 var (
 	_shineGradient     *ebiten.Image
 	_shineGradientOnce sync.Once
 	_shineMaskShader   *ebiten.Shader
 	_shineShaderOnce   sync.Once
+
+	_columnLeft  *ebiten.Image
+	_columnRight *ebiten.Image
 )
+
+func loadColumnImages() {
+	fl, err := os.Open("assets/img/column_left.png")
+	if err != nil {
+		return
+	}
+	defer fl.Close()
+	imgL, err := png.Decode(fl)
+	if err != nil {
+		return
+	}
+	fr, err := os.Open("assets/img/column_right.png")
+	if err != nil {
+		return
+	}
+	defer fr.Close()
+	imgR, err := png.Decode(fr)
+	if err != nil {
+		return
+	}
+	_columnLeft = ebiten.NewImageFromImage(imgL)
+	_columnRight = ebiten.NewImageFromImage(imgR)
+}
 
 func getShineGradientImage() *ebiten.Image {
 	_shineGradientOnce.Do(func() {
@@ -82,6 +119,10 @@ func titlePhaseTotalFrames() int {
 	return titleSlideFrames + titleShineFrames + titleColorFadeFrames + titleFadeFrames
 }
 
+func oscilloscopeStartFrame() int {
+	return titlePhaseTotalFrames() + columnsPhaseFrames
+}
+
 const titleText = "Adventures in Demosceneland"
 
 func quantize(v float64, grid int) float64 {
@@ -118,6 +159,7 @@ func init() {
 		_useV2Text = true
 		break
 	}
+	loadColumnImages()
 }
 
 type game struct {
@@ -130,6 +172,10 @@ type game struct {
 	titleH       float64
 	titleLayer   *ebiten.Image
 	titlePatch   *ebiten.Image
+
+	audioContext *audio.Context
+	musicPlayer  *audio.Player
+	musicStarted bool
 }
 
 func newGame() *game {
@@ -138,6 +184,14 @@ func newGame() *game {
 		buf:        buf,
 		titleLayer: ebiten.NewImage(screenW, screenH),
 		titlePatch: ebiten.NewImage(shineBandW, shineGradientH),
+	}
+	g.audioContext = audio.NewContext(audioSampleRate)
+	if data, err := os.ReadFile(musicPath); err == nil {
+		if stream, err := mp3.DecodeWithSampleRate(audioSampleRate, bytes.NewReader(data)); err == nil {
+			if p, err := g.audioContext.NewPlayer(stream); err == nil {
+				g.musicPlayer = p
+			}
+		}
 	}
 	if _useV2Text {
 		face := &textv2.GoTextFace{Source: _titleFaceSource, Size: titleFontSize}
@@ -155,6 +209,11 @@ func (g *game) reset() {
 	g.titleSlideT = 0
 	g.titleShineT = 0
 	g.phase = 0
+	g.musicStarted = false
+	if g.musicPlayer != nil {
+		_ = g.musicPlayer.Rewind()
+		g.musicPlayer.Pause()
+	}
 	for i := range g.buf {
 		g.buf[i] = 0
 	}
@@ -166,8 +225,8 @@ func (g *game) Update() error {
 		return nil
 	}
 	g.phase += 0.1
-	total := titlePhaseTotalFrames()
-	if g.titleFrame > total+oscilloscopeFlatFrames {
+	oscStart := oscilloscopeStartFrame()
+	if g.titleFrame > oscStart+oscilloscopeFlatFrames {
 		g.buf[0] = (rand.Float64() - 0.5) * 0.25
 		for i := 1; i < numPoints; i++ {
 			delta := (rand.Float64() - 0.5) * 0.08
@@ -175,6 +234,10 @@ func (g *game) Update() error {
 		}
 	}
 	g.titleFrame++
+	if !g.musicStarted && g.titleFrame > titlePhaseTotalFrames() && g.musicPlayer != nil {
+		g.musicPlayer.Play()
+		g.musicStarted = true
+	}
 	if g.titleFrame <= titleSlideFrames {
 		t := float64(g.titleFrame) / titleSlideFrames
 		g.titleSlideT = t * t * (3 - 2*t)
@@ -187,19 +250,82 @@ func (g *game) Update() error {
 
 func (g *game) Draw(screen *ebiten.Image) {
 	screen.Fill(color.Black)
-	if g.titleFrame > titlePhaseTotalFrames() {
-		g._drawOscilloscope(screen)
+	totalTitle := titlePhaseTotalFrames()
+	oscStart := oscilloscopeStartFrame()
+	if g.titleFrame > oscStart {
+		g._drawColumnsAndOscilloscope(screen)
+	} else if g.titleFrame > totalTitle {
+		g._drawColumnsPhase(screen)
 	} else {
 		g._drawTitle(screen)
 	}
 }
 
+var _columnsOffscreen *ebiten.Image
+
+func columnsOffscreen() *ebiten.Image {
+	if _columnsOffscreen == nil {
+		_columnsOffscreen = ebiten.NewImage(screenW, screenH)
+	}
+	return _columnsOffscreen
+}
+
+func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
+	totalTitle := titlePhaseTotalFrames()
+	t := float64(g.titleFrame-totalTitle) / float64(columnsPhaseFrames)
+	if t > 1 {
+		t = 1
+	}
+	t = t * t * (3 - 2*t)
+	zoom := 1.2 - 0.2*t
+	off := columnsOffscreen()
+	off.Fill(color.Black)
+	if _columnLeft != nil && _columnRight != nil {
+		lw, lh := _columnLeft.Bounds().Dx(), _columnLeft.Bounds().Dy()
+		rw, rh := _columnRight.Bounds().Dx(), _columnRight.Bounds().Dy()
+		leftX := float64(-lw) + t*float64(lw)
+		rightX := float64(screenW) - t*float64(rw)
+		leftY := (float64(screenH) - float64(lh)) / 2
+		rightY := (float64(screenH) - float64(rh)) / 2
+		opL := &ebiten.DrawImageOptions{}
+		opL.GeoM.Translate(leftX, leftY)
+		off.DrawImage(_columnLeft, opL)
+		opR := &ebiten.DrawImageOptions{}
+		opR.GeoM.Translate(rightX, rightY)
+		off.DrawImage(_columnRight, opR)
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(-float64(screenW)/2, -float64(screenH)/2)
+	op.GeoM.Scale(zoom, zoom)
+	op.GeoM.Translate(float64(screenW)/2, float64(screenH)/2)
+	screen.DrawImage(off, op)
+}
+
+func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
+	screen.Fill(color.Black)
+	if _columnLeft != nil && _columnRight != nil {
+		lh := _columnLeft.Bounds().Dy()
+		rw, rh := _columnRight.Bounds().Dx(), _columnRight.Bounds().Dy()
+		leftY := (float64(screenH) - float64(lh)) / 2
+		rightY := (float64(screenH) - float64(rh)) / 2
+		opL := &ebiten.DrawImageOptions{}
+		opL.GeoM.Translate(0, leftY)
+		screen.DrawImage(_columnLeft, opL)
+		opR := &ebiten.DrawImageOptions{}
+		opR.GeoM.Translate(float64(screenW-rw), rightY)
+		screen.DrawImage(_columnRight, opR)
+	}
+	g._drawOscilloscope(screen)
+}
+
 func (g *game) _drawOscilloscope(screen *ebiten.Image) {
 	midY := float64(screenH) / 2
 	scaleY := float64(screenH) * 0.35
-	stepX := float64(screenW) / float64(numPoints-1)
+	lineW := float64(oscilloscopeLineWidth())
+	offsetX := float64(oscilloscopeMarginX())
+	stepX := lineW / float64(numPoints-1)
 	for i := 0; i < numPoints; i++ {
-		x := quantize(float64(i)*stepX, pixelSize)
+		x := quantize(offsetX+float64(i)*stepX, pixelSize)
 		y := quantize(midY-g.buf[i]*scaleY, pixelSize)
 		clr := yellowShade(i, g.phase)
 		vector.DrawFilledRect(screen, float32(x), float32(y), float32(pixelSize), float32(pixelSize), clr, false)
