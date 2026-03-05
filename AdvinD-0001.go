@@ -364,20 +364,26 @@ func (g *game) _drawTitle(screen *ebiten.Image) {
 	}
 	alphaScale := 1.0 - fadeT
 
-	baseClr := yellowShade(0, g.phase)
-	baseClr.R = uint8(float64(baseClr.R) * colorBrightness * (1 - fadeT))
-	baseClr.G = uint8(float64(baseClr.G) * colorBrightness * (1 - fadeT))
-	baseClr.B = uint8(float64(baseClr.B) * colorBrightness * (1 - fadeT))
-
 	g.titleLayer.Fill(color.RGBA{A: 0})
-	if _useV2Text {
-		op := &textv2.DrawOptions{}
-		op.GeoM.Translate(titleX, titleY)
-		op.ColorScale.ScaleWithColor(baseClr)
-		face := &textv2.GoTextFace{Source: _titleFaceSource, Size: titleFontSize}
-		textv2.Draw(g.titleLayer, titleText, face, op)
-	} else {
-		textDrawLegacy(g.titleLayer, titleText, int(titleX), int(titleY), baseClr)
+	face := &textv2.GoTextFace{Source: _titleFaceSource, Size: titleFontSize}
+	x := titleX
+	for i, r := range titleText {
+		baseClr := yellowShade(i*5, g.phase)
+		baseClr.R = uint8(float64(baseClr.R) * colorBrightness * (1 - fadeT))
+		baseClr.G = uint8(float64(baseClr.G) * colorBrightness * (1 - fadeT))
+		baseClr.B = uint8(float64(baseClr.B) * colorBrightness * (1 - fadeT))
+		if _useV2Text {
+			op := &textv2.DrawOptions{}
+			op.GeoM.Translate(x, titleY)
+			op.ColorScale.ScaleWithColor(baseClr)
+			textv2.Draw(g.titleLayer, string(r), face, op)
+			w, _ := textv2.Measure(string(r), face, titleFontSize*1.2)
+			x += w
+		} else {
+			textDrawLegacy(g.titleLayer, string(r), int(x), int(titleY), baseClr)
+			b := font.MeasureString(basicfont.Face7x13, string(r))
+			x += float64(b.Ceil())
+		}
 	}
 	screen.DrawImage(g.titleLayer, nil)
 
