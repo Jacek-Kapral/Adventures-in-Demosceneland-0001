@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"math"
 	"math/rand"
 	"os"
@@ -178,6 +180,7 @@ type game struct {
 	audioContext *audio.Context
 	musicPlayer  *audio.Player
 	musicStarted bool
+	pcmBuffer    []byte
 }
 
 func newGame() *game {
@@ -190,8 +193,11 @@ func newGame() *game {
 	g.audioContext = audio.NewContext(audioSampleRate)
 	if data, err := os.ReadFile(musicPath); err == nil {
 		if stream, err := mp3.DecodeWithSampleRate(audioSampleRate, bytes.NewReader(data)); err == nil {
-			if p, err := g.audioContext.NewPlayer(stream); err == nil {
-				g.musicPlayer = p
+			if pcm, err := io.ReadAll(stream); err == nil && len(pcm) > 0 {
+				g.pcmBuffer = pcm
+				if p, err := g.audioContext.NewPlayer(bytes.NewReader(pcm)); err == nil {
+					g.musicPlayer = p
+				}
 			}
 		}
 	}
@@ -204,6 +210,44 @@ func newGame() *game {
 		g.titleH = float64(basicfont.Face7x13.Metrics().Height.Ceil())
 	}
 	return g
+}
+
+const bytesPerFrame = 4
+
+func (g *game) _fillBufFromPCM() {
+	pos := g.musicPlayer.Position()
+	posSec := pos.Seconds()
+	currentFrame := int64(posSec * float64(audioSampleRate))
+	startFrame := currentFrame - int64(numPoints)
+	if startFrame < 0 {
+		startFrame = 0
+	}
+	for i := 0; i < numPoints; i++ {
+		frameIdx := startFrame + int64(i)
+		byteIdx := frameIdx * bytesPerFrame
+		if byteIdx+bytesPerFrame > int64(len(g.pcmBuffer)) {
+			g.buf[i] = 0
+			continue
+		}
+		if byteIdx < 0 {
+			g.buf[i] = 0
+			continue
+		}
+		lo := binary.LittleEndian.Uint16(g.pcmBuffer[byteIdx : byteIdx+2])
+		ro := binary.LittleEndian.Uint16(g.pcmBuffer[byteIdx+2 : byteIdx+4])
+		ls := int16(lo)
+		rs := int16(ro)
+		sample := (float64(ls) + float64(rs)) / 2 / 32768.0
+		g.buf[i] = sample
+	}
+}
+
+func (g *game) _fillBufRandom() {
+	g.buf[0] = (rand.Float64() - 0.5) * 0.25
+	for i := 1; i < numPoints; i++ {
+		delta := (rand.Float64() - 0.5) * 0.08
+		g.buf[i] = g.buf[i-1] + delta
+	}
 }
 
 func (g *game) reset() {
@@ -229,10 +273,10 @@ func (g *game) Update() error {
 	g.phase += 0.1
 	oscStart := oscilloscopeStartFrame()
 	if g.titleFrame > oscStart+oscilloscopeFlatFrames {
-		g.buf[0] = (rand.Float64() - 0.5) * 0.25
-		for i := 1; i < numPoints; i++ {
-			delta := (rand.Float64() - 0.5) * 0.08
-			g.buf[i] = g.buf[i-1] + delta
+		if len(g.pcmBuffer) > 0 && g.musicPlayer != nil {
+			g._fillBufFromPCM()
+		} else {
+			g._fillBufRandom()
 		}
 	}
 	g.titleFrame++
