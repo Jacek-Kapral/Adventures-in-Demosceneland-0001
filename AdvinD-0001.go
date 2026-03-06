@@ -45,6 +45,8 @@ const (
 	musicPath       = "assets/music/JungleMirage.mp3"
 
 	columnsAlpha = 0.4
+
+	pulseScale = 0.12
 )
 
 func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
@@ -349,19 +351,44 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 	screen.DrawImage(off, op)
 }
 
+func (g *game) _pulseFromBuf() float64 {
+	var sum float64
+	for i := 0; i < numPoints; i++ {
+		v := g.buf[i]
+		sum += v * v
+	}
+	rms := math.Sqrt(sum / float64(numPoints))
+	if rms > 1 {
+		rms = 1
+	}
+	return rms
+}
+
 func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 	screen.Fill(color.Black)
 	if _columnLeft != nil && _columnRight != nil {
-		lh := _columnLeft.Bounds().Dy()
+		lw, lh := _columnLeft.Bounds().Dx(), _columnLeft.Bounds().Dy()
 		rw, rh := _columnRight.Bounds().Dx(), _columnRight.Bounds().Dy()
 		leftY := (float64(screenH) - float64(lh)) / 2
 		rightY := (float64(screenH) - float64(rh)) / 2
+
+		pulse := float64(0)
+		if g.titleFrame > oscilloscopeStartFrame()+oscilloscopeFlatFrames && len(g.pcmBuffer) > 0 {
+			pulse = g._pulseFromBuf()
+		}
+		s := 1.0 + pulseScale*pulse
+
 		opL := &ebiten.DrawImageOptions{}
-		opL.GeoM.Translate(0, leftY)
+		opL.GeoM.Translate(-float64(lw)/2, -float64(lh)/2)
+		opL.GeoM.Scale(s, s)
+		opL.GeoM.Translate(float64(lw)/2, leftY+float64(lh)/2)
 		opL.ColorScale.ScaleAlpha(columnsAlpha)
 		screen.DrawImage(_columnLeft, opL)
+
 		opR := &ebiten.DrawImageOptions{}
-		opR.GeoM.Translate(float64(screenW-rw), rightY)
+		opR.GeoM.Translate(-float64(rw)/2, -float64(rh)/2)
+		opR.GeoM.Scale(s, s)
+		opR.GeoM.Translate(float64(screenW-rw)+float64(rw)/2, rightY+float64(rh)/2)
 		opR.ColorScale.ScaleAlpha(columnsAlpha)
 		screen.DrawImage(_columnRight, opR)
 	}
