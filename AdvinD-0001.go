@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"image"
 	"image/color"
+	"image/gif"
 	"image/png"
 	"io"
 	"math"
@@ -60,6 +61,9 @@ var (
 
 	_columnLeft  *ebiten.Image
 	_columnRight *ebiten.Image
+
+	_konsoleFrames []*ebiten.Image
+	_advieFrames   []*ebiten.Image
 )
 
 func loadColumnImages() {
@@ -83,6 +87,23 @@ func loadColumnImages() {
 	}
 	_columnLeft = ebiten.NewImageFromImage(imgL)
 	_columnRight = ebiten.NewImageFromImage(imgR)
+}
+
+func loadGIFFrames(path string) []*ebiten.Image {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	g, err := gif.DecodeAll(f)
+	if err != nil {
+		return nil
+	}
+	frames := make([]*ebiten.Image, 0, len(g.Image))
+	for _, src := range g.Image {
+		frames = append(frames, ebiten.NewImageFromImage(src))
+	}
+	return frames
 }
 
 func getShineGradientImage() *ebiten.Image {
@@ -166,6 +187,8 @@ func init() {
 		break
 	}
 	loadColumnImages()
+	_konsoleFrames = loadGIFFrames("assets/img/konsole.gif")
+	_advieFrames = loadGIFFrames("assets/img/advie.gif")
 }
 
 type game struct {
@@ -183,6 +206,9 @@ type game struct {
 	musicPlayer  *audio.Player
 	musicStarted bool
 	pcmBuffer    []byte
+
+	konsoleFrame int
+	advieFrame   int
 }
 
 func newGame() *game {
@@ -273,6 +299,12 @@ func (g *game) Update() error {
 		return nil
 	}
 	g.phase += 0.1
+	if len(_konsoleFrames) > 0 {
+		g.konsoleFrame++
+	}
+	if len(_advieFrames) > 0 {
+		g.advieFrame++
+	}
 	oscStart := oscilloscopeStartFrame()
 	if g.titleFrame > oscStart+oscilloscopeFlatFrames {
 		if len(g.pcmBuffer) > 0 && g.musicPlayer != nil {
@@ -393,6 +425,32 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 		screen.DrawImage(_columnRight, opR)
 	}
 	g._drawOscilloscope(screen)
+	g._drawGIFOverlays(screen)
+}
+
+func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
+	const frameDelay = 4
+
+	if len(_advieFrames) > 0 {
+		f := _advieFrames[(g.advieFrame/frameDelay)%len(_advieFrames)]
+		w, _ := f.Bounds().Dx(), f.Bounds().Dy()
+		x := float64(screenW-w) / 2
+		// górna krawędź 5% poniżej górnej krawędzi okna
+		y := float64(screenH) * 0.05
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(x, y)
+		screen.DrawImage(f, op)
+	}
+
+	if len(_konsoleFrames) > 0 {
+		f := _konsoleFrames[(g.konsoleFrame/frameDelay)%len(_konsoleFrames)]
+		w, h := f.Bounds().Dx(), f.Bounds().Dy()
+		x := float64(screenW-w) / 2
+		y := float64(screenH - h)
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(x, y)
+		screen.DrawImage(f, op)
+	}
 }
 
 func (g *game) _drawOscilloscope(screen *ebiten.Image) {
