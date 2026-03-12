@@ -365,8 +365,9 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 		rw, rh := _columnRight.Bounds().Dx(), _columnRight.Bounds().Dy()
 		leftX := float64(-lw) + t*float64(lw)
 		rightX := float64(screenW) - t*float64(rw)
-		leftY := (float64(screenH) - float64(lh)) / 2
-		rightY := (float64(screenH) - float64(rh)) / 2
+		marginY := float64(screenH) * 0.01
+		leftY := float64(screenH) - float64(lh) - marginY
+		rightY := float64(screenH) - float64(rh) - marginY
 		opL := &ebiten.DrawImageOptions{}
 		opL.GeoM.Translate(leftX, leftY)
 		opL.ColorScale.ScaleAlpha(columnsAlpha)
@@ -401,8 +402,9 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 	if _columnLeft != nil && _columnRight != nil {
 		lw, lh := _columnLeft.Bounds().Dx(), _columnLeft.Bounds().Dy()
 		rw, rh := _columnRight.Bounds().Dx(), _columnRight.Bounds().Dy()
-		leftY := (float64(screenH) - float64(lh)) / 2
-		rightY := (float64(screenH) - float64(rh)) / 2
+		marginY := float64(screenH) * 0.01
+		leftY := float64(screenH) - float64(lh) - marginY
+		rightY := float64(screenH) - float64(rh) - marginY
 
 		pulse := float64(0)
 		if g.titleFrame > oscilloscopeStartFrame()+oscilloscopeFlatFrames && len(g.pcmBuffer) > 0 {
@@ -448,6 +450,7 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 		x := float64(screenW-w) / 2
 		y := float64(screenH - h)
 		op := &ebiten.DrawImageOptions{}
+		op.ColorScale.ScaleAlpha(columnsAlpha)
 		op.GeoM.Translate(x, y)
 		screen.DrawImage(f, op)
 	}
