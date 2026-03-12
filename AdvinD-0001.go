@@ -64,6 +64,11 @@ var (
 
 	_konsoleFrames []*ebiten.Image
 	_advieFrames   []*ebiten.Image
+
+	_oscScreenLeft   float64
+	_oscScreenRight  float64
+	_oscScreenTop    float64
+	_oscScreenBottom float64
 )
 
 func loadColumnImages() {
@@ -189,6 +194,19 @@ func init() {
 	loadColumnImages()
 	_konsoleFrames = loadGIFFrames("assets/img/konsole.gif")
 	_advieFrames = loadGIFFrames("assets/img/advie.gif")
+	if len(_konsoleFrames) > 0 {
+		w := _konsoleFrames[0].Bounds().Dx()
+		h := _konsoleFrames[0].Bounds().Dy()
+		marginY := float64(screenH) * 0.01
+		consoleX := float64(screenW-w) / 2
+		consoleY := float64(screenH) - float64(h) - marginY
+
+		// Wartości z pomiaru: 60px od lewej, 77px od prawej, 4px od góry, 49px od dołu ekranu konsoli.
+		_oscScreenLeft = consoleX + 60
+		_oscScreenRight = consoleX + float64(w) - 77
+		_oscScreenTop = consoleY + 4
+		_oscScreenBottom = consoleY + float64(h) - 49
+	}
 }
 
 type game struct {
@@ -382,6 +400,22 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 	op.GeoM.Scale(zoom, zoom)
 	op.GeoM.Translate(float64(screenW)/2, float64(screenH)/2)
 	screen.DrawImage(off, op)
+
+	// Wjazd konsoli od dołu w tej samej fazie co kolumny
+	if len(_konsoleFrames) > 0 {
+		const frameDelay = 4
+		f := _konsoleFrames[(g.konsoleFrame/frameDelay)%len(_konsoleFrames)]
+		w, h := f.Bounds().Dx(), f.Bounds().Dy()
+		marginY := float64(screenH) * 0.01
+		finalY := float64(screenH) - float64(h) - marginY
+		startY := float64(screenH)
+		y := startY + t*(finalY-startY)
+		x := float64(screenW-w) / 2
+		opK := &ebiten.DrawImageOptions{}
+		opK.GeoM.Translate(x, y)
+		opK.ColorScale.ScaleAlpha(columnsAlpha)
+		screen.DrawImage(f, opK)
+	}
 }
 
 func (g *game) _pulseFromBuf() float64 {
@@ -458,11 +492,19 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 }
 
 func (g *game) _drawOscilloscope(screen *ebiten.Image) {
+	// Jeśli mamy zdefiniowany prostokąt ekranu konsoli, dopasuj oscyloskop do jego środka.
 	midY := float64(screenH) / 2
 	scaleY := float64(screenH) * 0.35
-
-	lineW := float64(oscilloscopeLineWidth())
 	offsetX := float64(oscilloscopeMarginX())
+	lineW := float64(oscilloscopeLineWidth())
+	if _oscScreenRight > _oscScreenLeft && _oscScreenBottom > _oscScreenTop {
+		lineW = _oscScreenRight - _oscScreenLeft
+		offsetX = _oscScreenLeft
+		midY = (_oscScreenTop + _oscScreenBottom) / 2
+		// lekko w dół (10% wysokości ekranu konsoli), żeby wizualnie siedział niżej
+		midY += (_oscScreenBottom - _oscScreenTop) * 0.10
+		scaleY = (_oscScreenBottom - _oscScreenTop) * 0.45
+	}
 	stepX := lineW / float64(numPoints-1)
 	for i := 0; i < numPoints; i++ {
 		x := quantize(offsetX+float64(i)*stepX, pixelSize)
