@@ -67,7 +67,7 @@ var (
 )
 
 func loadColumnImages() {
-	fl, err := os.Open("assets/img/column_left.png")
+	fl, err := os.Open("assets/img/column_left_154px.png")
 	if err != nil {
 		return
 	}
@@ -76,7 +76,7 @@ func loadColumnImages() {
 	if err != nil {
 		return
 	}
-	fr, err := os.Open("assets/img/column_right.png")
+	fr, err := os.Open("assets/img/column_right_154px.png")
 	if err != nil {
 		return
 	}
