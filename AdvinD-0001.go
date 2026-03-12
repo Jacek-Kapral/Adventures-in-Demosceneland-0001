@@ -48,6 +48,18 @@ const (
 	columnsAlpha = 0.4
 
 	pulseScale = 0.12
+
+	smokeParticles       = 15
+	smokeChunkSize       = 6
+	smokeBlobGrid        = 50
+	smokeRiseSpeedMin   = 0.18
+	smokeRiseSpeedMax   = 0.5
+	smokeFadeSpeed      = 0.002
+	smokeTurbulence     = 1.6
+	smokeSpreadAtTop    = 2.2
+	smokeEmitterYMin    = 0.92
+	smokeEmitterYMax    = 1.04
+	smokeEmitterHalfSpan = 0.22
 )
 
 func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
@@ -227,6 +239,15 @@ type game struct {
 
 	konsoleFrame int
 	advieFrame   int
+
+	smoke []struct {
+		x, y           float64
+		alpha          float64
+		riseSpeed      float64
+		phaseOffset    float64
+		shade          float64
+		structureSeed  float64
+	}
 }
 
 func newGame() *game {
@@ -254,6 +275,17 @@ func newGame() *game {
 		b := font.MeasureString(basicfont.Face7x13, titleText)
 		g.titleW = float64(b.Ceil())
 		g.titleH = float64(basicfont.Face7x13.Metrics().Height.Ceil())
+	}
+	g.smoke = make([]struct {
+		x, y           float64
+		alpha          float64
+		riseSpeed      float64
+		phaseOffset    float64
+		shade          float64
+		structureSeed  float64
+	}, smokeParticles)
+	for i := range g.smoke {
+		g._respawnSmoke(i)
 	}
 	return g
 }
@@ -296,6 +328,19 @@ func (g *game) _fillBufRandom() {
 	}
 }
 
+func (g *game) _respawnSmoke(i int) {
+	cx := float64(screenW) * 0.5
+	half := float64(screenW) * smokeEmitterHalfSpan
+	g.smoke[i].x = cx + (rand.Float64()*2-1)*half
+	baseY := smokeEmitterYMin + rand.Float64()*(smokeEmitterYMax-smokeEmitterYMin)
+	g.smoke[i].y = float64(screenH) * baseY
+	g.smoke[i].alpha = 0.25 + rand.Float64()*0.4
+	g.smoke[i].riseSpeed = smokeRiseSpeedMin + rand.Float64()*(smokeRiseSpeedMax-smokeRiseSpeedMin)
+	g.smoke[i].phaseOffset = rand.Float64() * math.Pi * 2
+	g.smoke[i].shade = 0.55 + rand.Float64()*0.45
+	g.smoke[i].structureSeed = rand.Float64() * math.Pi * 2
+}
+
 func (g *game) reset() {
 	g.titleFrame = 0
 	g.titleSlideT = 0
@@ -308,6 +353,9 @@ func (g *game) reset() {
 	}
 	for i := range g.buf {
 		g.buf[i] = 0
+	}
+	for i := range g.smoke {
+		g._respawnSmoke(i)
 	}
 }
 
@@ -342,6 +390,26 @@ func (g *game) Update() error {
 	}
 	if g.titleFrame > titleSlideFrames && g.titleFrame <= titleSlideFrames+titleShineFrames {
 		g.titleShineT = float64(g.titleFrame-titleSlideFrames) / titleShineFrames
+	}
+	if g.titleFrame > oscilloscopeStartFrame() {
+		sh := float64(screenH)
+		for i := range g.smoke {
+			p := &g.smoke[i]
+			heightNorm := p.y / sh
+			if heightNorm < 0 {
+				heightNorm = 0
+			}
+			vy := p.riseSpeed * (0.35 + 0.65*heightNorm)
+			p.y -= vy
+			turbScale := smokeTurbulence * (0.5 + 0.5*(1-heightNorm)*smokeSpreadAtTop)
+			dx := turbScale * (math.Sin(g.phase*0.06+p.phaseOffset) + 0.55*math.Sin(g.phase*0.14+p.phaseOffset*2.1) + 0.3*math.Sin(g.phase*0.22+p.phaseOffset*0.7))
+			p.x += dx
+			p.alpha -= smokeFadeSpeed * (0.7 + 0.3*(1-heightNorm))
+			blobH := float64(smokeBlobGrid * smokeChunkSize)
+			if p.y < -blobH || p.alpha <= 0 || p.x < -blobH || p.x > float64(screenW+int(blobH)) {
+				g._respawnSmoke(i)
+			}
+		}
 	}
 	return nil
 }
@@ -433,6 +501,7 @@ func (g *game) _pulseFromBuf() float64 {
 
 func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 	screen.Fill(color.Black)
+	g._drawSmoke(screen)
 	if _columnLeft != nil && _columnRight != nil {
 		lw, lh := _columnLeft.Bounds().Dx(), _columnLeft.Bounds().Dy()
 		rw, rh := _columnRight.Bounds().Dx(), _columnRight.Bounds().Dy()
@@ -464,19 +533,58 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 	g._drawGIFOverlays(screen)
 }
 
+
+func (g *game) _drawSmoke(screen *ebiten.Image) {
+	cell := float32(smokeChunkSize)
+	half := (smokeBlobGrid - 1) / 2
+	maxR := float64(half)
+	for i := range g.smoke {
+		p := &g.smoke[i]
+		if p.alpha <= 0 {
+			continue
+		}
+		a := p.alpha
+		if a > 1 {
+			a = 1
+		}
+		for dy := -half; dy <= half; dy++ {
+			for dx := -half; dx <= half; dx++ {
+				r := math.Sqrt(float64(dx*dx + dy*dy))
+				angle := math.Atan2(float64(dy), float64(dx))
+				boundary := 1 + 0.4*math.Sin(angle*5+p.structureSeed) + 0.25*math.Sin(angle*8+p.structureSeed*1.2) + 0.15*math.Sin(angle*3-p.structureSeed*0.8)
+				if r > maxR*boundary {
+					continue
+				}
+				distNorm := r / (maxR * 1.2)
+				if distNorm > 1 {
+					distNorm = 1
+				}
+				falloff := 1.0 - 0.7*distNorm
+				structureMod := 0.72 + 0.38*math.Sin(p.structureSeed+float64(dx)*0.5+float64(dy)*0.6)
+				cellAlpha := a * falloff * structureMod
+				if cellAlpha < 0.03 {
+					continue
+				}
+				shadeMod := 0.82 + 0.24*math.Sin(p.structureSeed*0.7+float64(dx+dy)*0.4)
+				gray := p.shade * shadeMod
+				if gray < 0.4 {
+					gray = 0.4
+				}
+				if gray > 1 {
+					gray = 1
+				}
+				u8 := uint8(gray * 255)
+				clr := color.RGBA{R: u8, G: u8, B: u8, A: uint8(cellAlpha * 255)}
+				x := float32(p.x) + float32(dx)*cell
+				y := float32(p.y) + float32(dy)*cell
+				vector.DrawFilledRect(screen, x, y, cell, cell, clr, false)
+			}
+		}
+	}
+}
+
 func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 	const frameDelay = 4
-
-	if len(_advieFrames) > 0 {
-		f := _advieFrames[(g.advieFrame/frameDelay)%len(_advieFrames)]
-		w, _ := f.Bounds().Dx(), f.Bounds().Dy()
-		x := float64(screenW-w) / 2
-		// górna krawędź 5% poniżej górnej krawędzi okna
-		y := float64(screenH) * 0.05
-		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(x, y)
-		screen.DrawImage(f, op)
-	}
 
 	if len(_konsoleFrames) > 0 {
 		f := _konsoleFrames[(g.konsoleFrame/frameDelay)%len(_konsoleFrames)]
@@ -486,6 +594,15 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 		y := float64(screenH) - float64(h) - marginY
 		op := &ebiten.DrawImageOptions{}
 		op.ColorScale.ScaleAlpha(columnsAlpha)
+		op.GeoM.Translate(x, y)
+		screen.DrawImage(f, op)
+	}
+	if len(_advieFrames) > 0 {
+		f := _advieFrames[(g.advieFrame/frameDelay)%len(_advieFrames)]
+		w, _ := f.Bounds().Dx(), f.Bounds().Dy()
+		x := float64(screenW-w) / 2
+		y := float64(screenH) * 0.05
+		op := &ebiten.DrawImageOptions{}
 		op.GeoM.Translate(x, y)
 		screen.DrawImage(f, op)
 	}
