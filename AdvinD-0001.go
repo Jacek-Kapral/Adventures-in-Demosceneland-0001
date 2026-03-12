@@ -479,12 +479,28 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 		screen.DrawImage(f, op)
 	}
 	if len(_advieFrames) > 0 {
+		oscStart := oscilloscopeStartFrame()
+		flatEnd := oscStart + oscilloscopeFlatFrames
+		advieAlpha := 1.0
+		if g.titleFrame < flatEnd {
+			t := float64(g.titleFrame-oscStart) / float64(oscilloscopeFlatFrames)
+			if t < 0 {
+				t = 0
+			}
+			if t > 1 {
+				t = 1
+			}
+			t = t * t * (3 - 2*t)
+			advieAlpha = t
+		}
 		f := _advieFrames[(g.advieFrame/frameDelay)%len(_advieFrames)]
 		w, _ := f.Bounds().Dx(), f.Bounds().Dy()
-		x := float64(screenW-w) / 2
-		y := float64(screenH) * 0.05
+		topY := float64(screenH) * 0.04
 		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(x, y)
+		op.ColorScale.ScaleAlpha(float32(advieAlpha))
+		op.GeoM.Translate(-float64(w)/2, 0)
+		op.GeoM.Scale(1.35, 1.35)
+		op.GeoM.Translate(float64(screenW)/2, topY)
 		screen.DrawImage(f, op)
 	}
 }
