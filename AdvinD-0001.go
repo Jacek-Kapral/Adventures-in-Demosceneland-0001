@@ -48,6 +48,8 @@ const (
 	columnsAlpha = 0.4
 
 	pulseScale = 0.12
+
+	advieSpeedScale = 1.12 // mnożnik tempa advie.gif: >1 szybszy, <1 wolniejszy (konsola bez zmian)
 )
 
 func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
@@ -62,8 +64,10 @@ var (
 	_columnLeft  *ebiten.Image
 	_columnRight *ebiten.Image
 
-	_konsoleFrames []*ebiten.Image
-	_advieFrames   []*ebiten.Image
+	_konsoleFrames   []*ebiten.Image
+	_advieFrames     []*ebiten.Image
+	_konsoleDelaysMs []int
+	_advieDelaysMs   []int
 
 	_oscScreenLeft   float64
 	_oscScreenRight  float64
@@ -94,21 +98,50 @@ func loadColumnImages() {
 	_columnRight = ebiten.NewImageFromImage(imgR)
 }
 
-func loadGIFFrames(path string) []*ebiten.Image {
+func loadGIFFrames(path string) (frames []*ebiten.Image, delaysMs []int) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	defer f.Close()
 	g, err := gif.DecodeAll(f)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	frames := make([]*ebiten.Image, 0, len(g.Image))
-	for _, src := range g.Image {
+	frames = make([]*ebiten.Image, 0, len(g.Image))
+	delaysMs = make([]int, 0, len(g.Image))
+	for i, src := range g.Image {
 		frames = append(frames, ebiten.NewImageFromImage(src))
+		d := 100
+		if i < len(g.Delay) && g.Delay[i] > 0 {
+			d = g.Delay[i] * 10
+		}
+		delaysMs = append(delaysMs, d)
 	}
-	return frames
+	return frames, delaysMs
+}
+
+func gifFrameIndex(tickCount int, delaysMs []int) int {
+	if len(delaysMs) == 0 {
+		return 0
+	}
+	elapsedMs := tickCount * 1000 / 60
+	var loopMs int
+	for _, d := range delaysMs {
+		loopMs += d
+	}
+	if loopMs <= 0 {
+		return 0
+	}
+	t := elapsedMs % loopMs
+	var sum int
+	for i, d := range delaysMs {
+		if t < sum+d {
+			return i
+		}
+		sum += d
+	}
+	return len(delaysMs) - 1
 }
 
 func getShineGradientImage() *ebiten.Image {
@@ -192,8 +225,8 @@ func init() {
 		break
 	}
 	loadColumnImages()
-	_konsoleFrames = loadGIFFrames("assets/img/konsole.gif")
-	_advieFrames = loadGIFFrames("assets/img/advie.gif")
+	_konsoleFrames, _konsoleDelaysMs = loadGIFFrames("assets/img/konsole120.gif")
+	_advieFrames, _advieDelaysMs = loadGIFFrames("assets/img/advie110.gif")
 	if len(_konsoleFrames) > 0 {
 		w := _konsoleFrames[0].Bounds().Dx()
 		h := _konsoleFrames[0].Bounds().Dy()
@@ -403,8 +436,8 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 
 	// Wjazd konsoli od dołu w tej samej fazie co kolumny
 	if len(_konsoleFrames) > 0 {
-		const frameDelay = 4
-		f := _konsoleFrames[(g.konsoleFrame/frameDelay)%len(_konsoleFrames)]
+		idx := gifFrameIndex(g.konsoleFrame, _konsoleDelaysMs) % len(_konsoleFrames)
+		f := _konsoleFrames[idx]
 		w, h := f.Bounds().Dx(), f.Bounds().Dy()
 		marginY := float64(screenH) * 0.01
 		finalY := float64(screenH) - float64(h) - marginY
@@ -465,10 +498,9 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 }
 
 func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
-	const frameDelay = 4
-
 	if len(_konsoleFrames) > 0 {
-		f := _konsoleFrames[(g.konsoleFrame/frameDelay)%len(_konsoleFrames)]
+		idx := gifFrameIndex(g.konsoleFrame, _konsoleDelaysMs) % len(_konsoleFrames)
+		f := _konsoleFrames[idx]
 		w, h := f.Bounds().Dx(), f.Bounds().Dy()
 		x := float64(screenW-w) / 2
 		marginY := float64(screenH) * 0.01
@@ -493,7 +525,8 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 			t = t * t * (3 - 2*t)
 			advieAlpha = t
 		}
-		f := _advieFrames[(g.advieFrame/frameDelay)%len(_advieFrames)]
+		idx := gifFrameIndex(int(float64(g.advieFrame)*advieSpeedScale), _advieDelaysMs) % len(_advieFrames)
+		f := _advieFrames[idx]
 		w, _ := f.Bounds().Dx(), f.Bounds().Dy()
 		topY := float64(screenH) * 0.04
 		op := &ebiten.DrawImageOptions{}
