@@ -448,7 +448,8 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 		f := _konsoleFrames[(g.konsoleFrame/frameDelay)%len(_konsoleFrames)]
 		w, h := f.Bounds().Dx(), f.Bounds().Dy()
 		x := float64(screenW-w) / 2
-		y := float64(screenH - h)
+		marginY := float64(screenH) * 0.01
+		y := float64(screenH) - float64(h) - marginY
 		op := &ebiten.DrawImageOptions{}
 		op.ColorScale.ScaleAlpha(columnsAlpha)
 		op.GeoM.Translate(x, y)
@@ -459,6 +460,7 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 func (g *game) _drawOscilloscope(screen *ebiten.Image) {
 	midY := float64(screenH) / 2
 	scaleY := float64(screenH) * 0.35
+
 	lineW := float64(oscilloscopeLineWidth())
 	offsetX := float64(oscilloscopeMarginX())
 	stepX := lineW / float64(numPoints-1)
