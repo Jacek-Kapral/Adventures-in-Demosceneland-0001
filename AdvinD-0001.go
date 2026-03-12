@@ -49,7 +49,7 @@ const (
 
 	pulseScale = 0.12
 
-	advieSpeedScale = 1.12 // mnożnik tempa advie.gif: >1 szybszy, <1 wolniejszy (konsola bez zmian)
+	advieSpeedScale = 1.12
 )
 
 func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
@@ -233,8 +233,6 @@ func init() {
 		marginY := float64(screenH) * 0.01
 		consoleX := float64(screenW-w) / 2
 		consoleY := float64(screenH) - float64(h) - marginY
-
-		// Wartości z pomiaru: 60px od lewej, 77px od prawej, 4px od góry, 49px od dołu ekranu konsoli.
 		_oscScreenLeft = consoleX + 60
 		_oscScreenRight = consoleX + float64(w) - 77
 		_oscScreenTop = consoleY + 4
@@ -433,8 +431,6 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 	op.GeoM.Scale(zoom, zoom)
 	op.GeoM.Translate(float64(screenW)/2, float64(screenH)/2)
 	screen.DrawImage(off, op)
-
-	// Wjazd konsoli od dołu w tej samej fazie co kolumny
 	if len(_konsoleFrames) > 0 {
 		idx := gifFrameIndex(g.konsoleFrame, _konsoleDelaysMs) % len(_konsoleFrames)
 		f := _konsoleFrames[idx]
@@ -473,7 +469,7 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 		leftY := float64(screenH) - float64(lh) - marginY
 		rightY := float64(screenH) - float64(rh) - marginY
 
-		pulse := float64(0)
+		var pulse float64
 		if g.titleFrame > oscilloscopeStartFrame()+oscilloscopeFlatFrames && len(g.pcmBuffer) > 0 {
 			pulse = g._pulseFromBuf()
 		}
@@ -522,8 +518,7 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 			if t > 1 {
 				t = 1
 			}
-			t = t * t * (3 - 2*t)
-			advieAlpha = t
+			advieAlpha = t * t * (3 - 2*t)
 		}
 		idx := gifFrameIndex(int(float64(g.advieFrame)*advieSpeedScale), _advieDelaysMs) % len(_advieFrames)
 		f := _advieFrames[idx]
@@ -539,7 +534,6 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 }
 
 func (g *game) _drawOscilloscope(screen *ebiten.Image) {
-	// Jeśli mamy zdefiniowany prostokąt ekranu konsoli, dopasuj oscyloskop do jego środka.
 	midY := float64(screenH) / 2
 	scaleY := float64(screenH) * 0.35
 	offsetX := float64(oscilloscopeMarginX())
@@ -548,7 +542,6 @@ func (g *game) _drawOscilloscope(screen *ebiten.Image) {
 		lineW = _oscScreenRight - _oscScreenLeft
 		offsetX = _oscScreenLeft
 		midY = (_oscScreenTop + _oscScreenBottom) / 2
-		// lekko w dół (10% wysokości ekranu konsoli), żeby wizualnie siedział niżej
 		midY += (_oscScreenBottom - _oscScreenTop) * 0.10
 		scaleY = (_oscScreenBottom - _oscScreenTop) * 0.45
 	}
