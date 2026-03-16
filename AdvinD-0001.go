@@ -85,6 +85,9 @@ var (
 	_oscScreenTop    float64
 	_oscScreenBottom float64
 
+	_scanlineOverlay *ebiten.Image
+	_scanlineOnce    sync.Once
+
 	_spotlightColors = []struct{ R, G, B uint8 }{
 		{255, 255, 255},
 		{255, 100, 80},
@@ -259,6 +262,7 @@ func init() {
 	loadColumnImages()
 	_konsoleFrames, _konsoleDelaysMs = loadGIFFrames("assets/img/konsole120.gif")
 	_advieFrames, _advieDelaysMs = loadGIFFrames("assets/img/advie110.gif")
+	getScanlineOverlay()
 	if len(_konsoleFrames) > 0 {
 		w := _konsoleFrames[0].Bounds().Dx()
 		h := _konsoleFrames[0].Bounds().Dy()
@@ -491,6 +495,33 @@ func columnsOffscreen() *ebiten.Image {
 	return _columnsOffscreen
 }
 
+const scanlineAlpha = 55
+
+func getScanlineOverlay() *ebiten.Image {
+	_scanlineOnce.Do(func() {
+		_scanlineOverlay = ebiten.NewImage(screenW, screenH)
+		buf := make([]byte, screenW*screenH*4)
+		for y := 0; y < screenH; y++ {
+			dark := (y/2)%2 == 1
+			for x := 0; x < screenW; x++ {
+				idx := (y*screenW + x) * 4
+				if dark {
+					buf[idx], buf[idx+1], buf[idx+2], buf[idx+3] = 0, 0, 0, scanlineAlpha
+				} else {
+					buf[idx], buf[idx+1], buf[idx+2], buf[idx+3] = 0, 0, 0, 0
+				}
+			}
+		}
+		_scanlineOverlay.ReplacePixels(buf)
+	})
+	return _scanlineOverlay
+}
+
+func (g *game) _drawScanlines(screen *ebiten.Image) {
+	op := &ebiten.DrawImageOptions{}
+	screen.DrawImage(getScanlineOverlay(), op)
+}
+
 func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 	totalTitle := titlePhaseTotalFrames()
 	t := float64(g.titleFrame-totalTitle) / float64(columnsPhaseFrames)
@@ -537,6 +568,7 @@ func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 		opK.ColorScale.ScaleAlpha(columnsAlpha)
 		screen.DrawImage(f, opK)
 	}
+	g._drawScanlines(screen)
 }
 
 func (g *game) _pulseFromBuf() float64 {
@@ -584,6 +616,7 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 	g._drawOscilloscope(screen)
 	g._drawSpotlightBeams(screen)
 	g._drawGIFOverlays(screen)
+	g._drawScanlines(screen)
 }
 
 func (g *game) _drawSpotlightBeams(screen *ebiten.Image) {
@@ -775,6 +808,7 @@ func (g *game) _drawTitle(screen *ebiten.Image) {
 		op.Images[1] = g.titlePatch
 		screen.DrawRectShader(shineBandW, shineGradientH, shader, op)
 	}
+	g._drawScanlines(screen)
 }
 
 func textDrawLegacy(screen *ebiten.Image, msg string, x, y int, clr color.Color) {
