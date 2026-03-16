@@ -15,6 +15,8 @@ const (
 	numBeams       = 7
 	beamLen        = 400
 	beamHalfAngle  = 12.0 * math.Pi / 180
+	softAngleOut   = 2.2
+	softLenOut     = 1.25
 	fadePerFrame   = 0.965
 	spreadPerFrame = 0.28
 )
@@ -103,14 +105,12 @@ func (g *spotlightGame) Draw(screen *ebiten.Image) {
 				for relAngle < -math.Pi {
 					relAngle += 2 * math.Pi
 				}
-				if math.Abs(relAngle) >= beamHalfAngle || dist >= beamLen {
-					continue
-				}
 				distNorm := dist / beamLen
 				radialFalloff := 1.0 - smoothstep(b.spread*0.9, b.spread*1.05, distNorm)
-				angleFalloff := 1.0 - smoothstep(beamHalfAngle*0.7, beamHalfAngle, math.Abs(relAngle))
+				angleFalloff := 1.0 - smoothstep(beamHalfAngle*0.3, beamHalfAngle*softAngleOut, math.Abs(relAngle))
 				lenFalloff := 1.0 - distNorm*0.4
-				factor := b.intensity * radialFalloff * angleFalloff * lenFalloff
+				softLenFalloff := 1.0 - smoothstep(beamLen*0.6, beamLen*softLenOut, dist)
+				factor := b.intensity * radialFalloff * angleFalloff * lenFalloff * softLenFalloff
 				if factor <= bestFactor {
 					continue
 				}
