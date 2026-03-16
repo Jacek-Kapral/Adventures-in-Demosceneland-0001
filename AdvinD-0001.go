@@ -50,6 +50,17 @@ const (
 	pulseScale = 0.12
 
 	advieSpeedScale = 1.12
+
+	numBeams        = 7
+	beamLen         = 400
+	beamHalfAngle   = 12.0 * math.Pi / 180
+	spotlightSoftAngleOut = 2.2
+	spotlightSoftLenOut   = 1.25
+	beamFadePerFrame   = 0.965
+	beamSpreadPerFrame  = 0.28
+	beatPulseMin        = 0.12
+	beatFlashInterval   = 0.38
+	beamBrightnessBoost = 1.35
 )
 
 func oscilloscopeLineWidth() int { return screenW - oscilloscopeShorterBy }
@@ -73,6 +84,16 @@ var (
 	_oscScreenRight  float64
 	_oscScreenTop    float64
 	_oscScreenBottom float64
+
+	_spotlightColors = []struct{ R, G, B uint8 }{
+		{255, 255, 255},
+		{255, 100, 80},
+		{80, 80, 255},
+		{80, 255, 120},
+		{255, 200, 60},
+		{255, 80, 200},
+		{80, 255, 255},
+	}
 )
 
 func loadColumnImages() {
@@ -194,6 +215,17 @@ func quantize(v float64, grid int) float64 {
 	return float64(int(v/float64(grid)) * grid)
 }
 
+func smoothstep(edge0, edge1, x float64) float64 {
+	if x <= edge0 {
+		return 0
+	}
+	if x >= edge1 {
+		return 1
+	}
+	t := (x - edge0) / (edge1 - edge0)
+	return t * t * (3 - 2*t)
+}
+
 func yellowShade(segmentIndex int, phase float64) color.RGBA {
 	t := float64(segmentIndex)*0.02 + phase*0.5
 	bright := 0.5 + 0.55*math.Sin(t)
@@ -240,6 +272,13 @@ func init() {
 	}
 }
 
+type beam struct {
+	angle      float64
+	colorIndex int
+	intensity  float64
+	spread     float64
+}
+
 type game struct {
 	buf          []float64
 	phase        float64
@@ -258,14 +297,25 @@ type game struct {
 
 	konsoleFrame int
 	advieFrame   int
+
+	beams           [numBeams]beam
+	spotlightBuf    []byte
+	spotlightLayer  *ebiten.Image
+	lastBeatTime    float64
 }
 
 func newGame() *game {
 	buf := make([]float64, numPoints)
 	g := &game{
-		buf:        buf,
-		titleLayer: ebiten.NewImage(screenW, screenH),
-		titlePatch: ebiten.NewImage(shineBandW, shineGradientH),
+		buf:           buf,
+		titleLayer:    ebiten.NewImage(screenW, screenH),
+		titlePatch:    ebiten.NewImage(shineBandW, shineGradientH),
+		spotlightBuf:  make([]byte, screenW*screenH*4),
+		spotlightLayer: ebiten.NewImage(screenW, screenH),
+	}
+	for i := range g.beams {
+		g.beams[i].angle = 2 * math.Pi * float64(i) / numBeams
+		g.beams[i].colorIndex = i % len(_spotlightColors)
 	}
 	g.audioContext = audio.NewContext(audioSampleRate)
 	if data, err := os.ReadFile(musicPath); err == nil {
@@ -340,6 +390,11 @@ func (g *game) reset() {
 	for i := range g.buf {
 		g.buf[i] = 0
 	}
+	g.lastBeatTime = 0
+	for i := range g.beams {
+		g.beams[i].intensity = 0
+		g.beams[i].spread = 0
+	}
 }
 
 func (g *game) Update() error {
@@ -374,7 +429,44 @@ func (g *game) Update() error {
 	if g.titleFrame > titleSlideFrames && g.titleFrame <= titleSlideFrames+titleShineFrames {
 		g.titleShineT = float64(g.titleFrame-titleSlideFrames) / titleShineFrames
 	}
+	if g.titleFrame > oscStart {
+		g._updateBeams()
+	}
 	return nil
+}
+
+func (g *game) _updateBeams() {
+	var time float64
+	if g.musicPlayer != nil && g.musicStarted {
+		time = g.musicPlayer.Position().Seconds()
+	} else {
+		time = float64(g.titleFrame-oscilloscopeStartFrame()) / 60.0
+	}
+	pulse := g._pulseFromBuf()
+	if pulse > beatPulseMin && (time - g.lastBeatTime) >= beatFlashInterval {
+		g.lastBeatTime = time
+		n := 2 + rand.Intn(3)
+		for k := 0; k < n; k++ {
+			i := rand.Intn(numBeams)
+			b := &g.beams[i]
+			b.intensity = 1.0
+			b.spread = 0
+			b.colorIndex = rand.Intn(len(_spotlightColors))
+		}
+	}
+	for i := range g.beams {
+		b := &g.beams[i]
+		if b.spread < 1 {
+			b.spread += beamSpreadPerFrame
+			if b.spread > 1 {
+				b.spread = 1
+			}
+		}
+		b.intensity *= beamFadePerFrame
+		if b.intensity < 0.002 {
+			b.intensity = 0
+		}
+	}
 }
 
 func (g *game) Draw(screen *ebiten.Image) {
@@ -490,7 +582,70 @@ func (g *game) _drawColumnsAndOscilloscope(screen *ebiten.Image) {
 		screen.DrawImage(_columnRight, opR)
 	}
 	g._drawOscilloscope(screen)
+	g._drawSpotlightBeams(screen)
 	g._drawGIFOverlays(screen)
+}
+
+func (g *game) _drawSpotlightBeams(screen *ebiten.Image) {
+	cx := float64(screenW) / 2
+	cy := float64(screenH) * 0.04
+	if len(_advieFrames) > 0 {
+		_, advieH := _advieFrames[0].Bounds().Dx(), _advieFrames[0].Bounds().Dy()
+		cy += float64(advieH) * 1.35 / 2
+	} else {
+		cy = float64(screenH) / 2
+	}
+	for i := 0; i < screenW*screenH*4; i += 4 {
+		g.spotlightBuf[i], g.spotlightBuf[i+1], g.spotlightBuf[i+2], g.spotlightBuf[i+3] = 0, 0, 0, 0
+	}
+	for y := 0; y < screenH; y++ {
+		for x := 0; x < screenW; x++ {
+			idx := (y*screenW + x) * 4
+			dx := float64(x) - cx
+			dy := float64(y) - cy
+			dist := math.Sqrt(dx*dx + dy*dy)
+			angle := math.Atan2(dy, dx)
+			var bestR, bestG, bestB float64
+			bestFactor := 0.0
+			for i := range g.beams {
+				b := &g.beams[i]
+				relAngle := angle - b.angle
+				for relAngle > math.Pi {
+					relAngle -= 2 * math.Pi
+				}
+				for relAngle < -math.Pi {
+					relAngle += 2 * math.Pi
+				}
+				distNorm := dist / beamLen
+				radialFalloff := 1.0 - smoothstep(b.spread*0.9, b.spread*1.05, distNorm)
+				angleFalloff := 1.0 - smoothstep(beamHalfAngle*0.3, beamHalfAngle*spotlightSoftAngleOut, math.Abs(relAngle))
+				lenFalloff := 1.0 - distNorm*0.4
+				softLenFalloff := 1.0 - smoothstep(beamLen*0.6, beamLen*spotlightSoftLenOut, dist)
+				factor := b.intensity * radialFalloff * angleFalloff * lenFalloff * softLenFalloff
+				if factor <= bestFactor {
+					continue
+				}
+				bestFactor = factor
+				if factor > 1 {
+					factor = 1
+				}
+				c := &_spotlightColors[b.colorIndex]
+				bestR = float64(c.R) * factor * beamBrightnessBoost
+				bestG = float64(c.G) * factor * beamBrightnessBoost
+				bestB = float64(c.B) * factor * beamBrightnessBoost
+			}
+			if bestFactor > 0 {
+				g.spotlightBuf[idx] = uint8(math.Min(255, math.Max(0, bestR)))
+				g.spotlightBuf[idx+1] = uint8(math.Min(255, math.Max(0, bestG)))
+				g.spotlightBuf[idx+2] = uint8(math.Min(255, math.Max(0, bestB)))
+				g.spotlightBuf[idx+3] = 255
+			}
+		}
+	}
+	g.spotlightLayer.ReplacePixels(g.spotlightBuf)
+	op := &ebiten.DrawImageOptions{}
+	op.CompositeMode = ebiten.CompositeModeLighter
+	screen.DrawImage(g.spotlightLayer, op)
 }
 
 func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
