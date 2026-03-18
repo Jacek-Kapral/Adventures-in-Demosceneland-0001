@@ -265,7 +265,7 @@ func init() {
 	}
 	loadColumnImages()
 	_konsoleFrames, _konsoleDelaysMs = loadGIFFrames("assets/img/konsole120.gif")
-	_advieFrames, _advieDelaysMs = loadGIFFrames("assets/img/advie110.gif")
+	_advieFrames, _advieDelaysMs = loadGIFFrames("assets/img/advie.gif")
 	getScanlineOverlay()
 	if advieVignetteEnabled {
 		getAdvieVignette()
