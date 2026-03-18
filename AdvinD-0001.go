@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
+	"image/draw"
 	"image/png"
 	"io"
 	"math"
@@ -87,6 +88,9 @@ var (
 
 	_scanlineOverlay *ebiten.Image
 	_scanlineOnce    sync.Once
+
+	_advieVignette     *ebiten.Image
+	_advieVignetteOnce sync.Once
 
 	_spotlightColors = []struct{ R, G, B uint8 }{
 		{255, 255, 255},
@@ -263,6 +267,9 @@ func init() {
 	_konsoleFrames, _konsoleDelaysMs = loadGIFFrames("assets/img/konsole120.gif")
 	_advieFrames, _advieDelaysMs = loadGIFFrames("assets/img/advie110.gif")
 	getScanlineOverlay()
+	if advieVignetteEnabled {
+		getAdvieVignette()
+	}
 	if len(_konsoleFrames) > 0 {
 		w := _konsoleFrames[0].Bounds().Dx()
 		h := _konsoleFrames[0].Bounds().Dy()
@@ -522,6 +529,80 @@ func (g *game) _drawScanlines(screen *ebiten.Image) {
 	screen.DrawImage(getScanlineOverlay(), op)
 }
 
+// Gradient start (as fraction of advie mask radius).
+// Increase to make the GIF less covered (start closer to the edge).
+const advieVignetteInner = 0.55
+const advieVignetteOuter = 0.95
+const advieVignetteStrength = 0.6
+const advieVignetteEnabled = false
+
+func getAdvieVignette() *ebiten.Image {
+	_advieVignetteOnce.Do(func() {
+		if len(_advieFrames) == 0 {
+			return
+		}
+		// Build a mask directly from the GIF alpha using stdlib image data.
+		// We MUST NOT call ebiten.Image.ReadPixels() here because init() runs
+		// before ebiten has a live GL context.
+		const advieGifPath = "assets/img/advie110.gif"
+		f, err := os.Open(advieGifPath)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		gi, err := gif.DecodeAll(f)
+		if err != nil || len(gi.Image) == 0 {
+			return
+		}
+		src := gi.Image[0]
+		b := src.Bounds()
+		w, h := b.Dx(), b.Dy()
+
+		rgba := image.NewRGBA(b)
+		draw.Draw(rgba, b, src, b.Min, draw.Over)
+
+		img := ebiten.NewImage(w, h)
+		buf := make([]byte, w*h*4)
+
+		// Build gradient mask:
+		// - gradient strength is 0 at the center, 1 towards the edge
+		// - and we multiply it by the GIF alpha, so we do NOT paint black outside
+		//   the actual visible advie shape (avoids the "black square").
+		cx := float64(w) / 2
+		cy := float64(h) / 2
+		radius := math.Min(float64(w), float64(h)) / 2
+		if radius < 1 {
+			radius = 1
+		}
+
+		// rgba.Pix is RGBA in bytes: [r,g,b,a, r,g,b,a, ...]
+		pix := rgba.Pix
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				i := y*w + x
+				a := pix[i*4+3]
+				if a == 0 {
+					buf[i*4+0], buf[i*4+1], buf[i*4+2], buf[i*4+3] = 0, 0, 0, 0
+					continue
+				}
+				dx := float64(x) - cx
+				dy := float64(y) - cy
+				dist := math.Sqrt(dx*dx + dy*dy)
+				distNorm := dist / radius
+				if distNorm > 1 {
+					distNorm = 1
+				}
+				t := smoothstep(advieVignetteInner, advieVignetteOuter, distNorm)
+				overlayA := uint8(math.Min(255, t*advieVignetteStrength*float64(a)))
+				buf[i*4+0], buf[i*4+1], buf[i*4+2], buf[i*4+3] = 0, 0, 0, overlayA
+			}
+		}
+		img.ReplacePixels(buf)
+		_advieVignette = img
+	})
+	return _advieVignette
+}
+
 func (g *game) _drawColumnsPhase(screen *ebiten.Image) {
 	totalTitle := titlePhaseTotalFrames()
 	t := float64(g.titleFrame-totalTitle) / float64(columnsPhaseFrames)
@@ -712,12 +793,25 @@ func (g *game) _drawGIFOverlays(screen *ebiten.Image) {
 		f := _advieFrames[idx]
 		w, _ := f.Bounds().Dx(), f.Bounds().Dy()
 		topY := float64(screenH) * 0.04
-		op := &ebiten.DrawImageOptions{}
-		op.ColorScale.ScaleAlpha(float32(advieAlpha))
-		op.GeoM.Translate(-float64(w)/2, 0)
-		op.GeoM.Scale(1.35, 1.35)
-		op.GeoM.Translate(float64(screenW)/2, topY)
-		screen.DrawImage(f, op)
+		opAdv := &ebiten.DrawImageOptions{}
+		opAdv.ColorScale.ScaleAlpha(float32(advieAlpha))
+		opAdv.GeoM.Translate(-float64(w)/2, 0)
+		opAdv.GeoM.Scale(1.35, 1.35)
+		opAdv.GeoM.Translate(float64(screenW)/2, topY)
+		screen.DrawImage(f, opAdv)
+
+		// Maskowanie snopów nie powinno podlegać fade-in GIF-a.
+		// Jeśli maska jest skalowana `advieAlpha`, to podczas wjazdu „kwadrat” potrafi
+		// znów prześwitywać.
+		if advieVignetteEnabled {
+			if vignette := getAdvieVignette(); vignette != nil {
+				opMask := &ebiten.DrawImageOptions{}
+				opMask.GeoM.Translate(-float64(w)/2, 0)
+				opMask.GeoM.Scale(1.35, 1.35)
+				opMask.GeoM.Translate(float64(screenW)/2, topY)
+				screen.DrawImage(vignette, opMask)
+			}
+		}
 	}
 }
 
